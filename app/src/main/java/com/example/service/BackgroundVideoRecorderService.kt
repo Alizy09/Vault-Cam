@@ -83,7 +83,19 @@ class BackgroundVideoRecorderService : LifecycleService() {
         when (intent?.action) {
             ACTION_START_RECORDING -> {
                 if (!_isRecording.value) {
-                    startForeground(NOTIFICATION_ID, buildNotification("Preparing camera..."))
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        try {
+                            val serviceType = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                            startForeground(NOTIFICATION_ID, buildNotification("Preparing camera..."), serviceType)
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            // Fallback to basic startForeground
+                            startForeground(NOTIFICATION_ID, buildNotification("Preparing camera..."))
+                        }
+                    } else {
+                        startForeground(NOTIFICATION_ID, buildNotification("Preparing camera..."))
+                    }
                     initializeAndStartRecording()
                 }
             }
@@ -180,12 +192,14 @@ class BackgroundVideoRecorderService : LifecycleService() {
 
                         if (error == VideoRecordEvent.Finalize.ERROR_NONE && tempFile != null && tempFile.exists() && tempFile.length() > 0) {
                             val duration = System.currentTimeMillis() - recordingStartTime
-                            encryptAndSave(tempFile, duration)
+                            saveRecording(tempFile, duration) {
+                                stopSelf()
+                            }
                         } else {
                             // Cleanup temp file in case of failure
                             tempFile?.delete()
+                            stopSelf()
                         }
-                        stopSelf()
                     }
                 }
             }
@@ -197,38 +211,58 @@ class BackgroundVideoRecorderService : LifecycleService() {
         }
     }
 
-    private fun encryptAndSave(tempFile: File, durationMs: Long) {
+    private fun saveRecording(tempFile: File, durationMs: Long, onComplete: () -> Unit) {
         serviceScope.launch {
             try {
-                // Post-record high performance AES-GCM encryption
                 val secureDir = File(filesDir, "vault_recordings")
                 if (!secureDir.exists()) secureDir.mkdirs()
 
-                val finalFileName = "rec_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.enc"
-                val encryptedFile = File(secureDir, finalFileName)
+                val finalFileName = "rec_${SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())}.mp4"
+                val finalFile = File(secureDir, finalFileName)
 
-                updateNotification("Securing recording in progress...")
+                updateNotification("Saving recording in progress...")
 
-                // File encryption process
-                CryptoEngine.encryptFile(tempFile, encryptedFile)
+                // Move or copy temp file to final file directly without encryption
+                var success = tempFile.renameTo(finalFile)
+                if (!success) {
+                    try {
+                        tempFile.inputStream().use { input ->
+                            finalFile.outputStream().use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+                        success = true
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
 
-                // Delete the raw, unencrypted temp file
-                tempFile.delete()
+                // Delete the original temp file
+                if (tempFile.exists()) {
+                    tempFile.delete()
+                }
 
-                // Insert into secure Room SQLite DB
-                val recording = Recording(
-                    title = "Recording ${SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault()).format(Date())}",
-                    filePath = encryptedFile.absolutePath,
-                    duration = durationMs,
-                    fileSize = encryptedFile.length()
-                )
-                repository.insertRecording(recording)
+                if (success && finalFile.exists() && finalFile.length() > 0) {
+                    // Insert into local SQLite DB
+                    val recording = Recording(
+                        title = "Recording ${SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault()).format(Date())}",
+                        filePath = finalFile.absolutePath,
+                        duration = durationMs,
+                        fileSize = finalFile.length()
+                    )
+                    repository.insertRecording(recording)
 
-                // Notify completion via notification
-                showCompletionNotification()
+                    // Notify completion via notification
+                    showCompletionNotification()
+                }
             } catch (e: Exception) {
                 e.printStackTrace()
                 tempFile.delete()
+            } finally {
+                // Always shut down the service completely when done
+                launch(Dispatchers.Main) {
+                    onComplete()
+                }
             }
         }
     }
@@ -321,8 +355,8 @@ class BackgroundVideoRecorderService : LifecycleService() {
         )
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Recording Saved Securely")
-            .setContentText("The background capture has been fully encrypted & vaulted.")
+            .setContentTitle("Recording Saved")
+            .setContentText("The background capture has been safely saved inside the app vault.")
             .setSmallIcon(android.R.drawable.presence_video_busy)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)

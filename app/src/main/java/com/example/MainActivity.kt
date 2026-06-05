@@ -41,7 +41,7 @@ class MainActivity : FragmentActivity() {
                 val activePlaybackFile by vaultViewModel.playbackFileState.collectAsState()
                 val recordings by vaultViewModel.recordingsList.collectAsState()
 
-                // Solicit core permission Solicitations
+                // Secure App Lock & Permissions Handling
                 val permissionsToRequest = mutableListOf(
                     Manifest.permission.CAMERA,
                     Manifest.permission.RECORD_AUDIO
@@ -51,27 +51,30 @@ class MainActivity : FragmentActivity() {
                     }
                 }
 
-                val permissionLauncher = rememberLauncherForActivityResult(
-                    contract = ActivityResultContracts.RequestMultiplePermissions(),
-                    onResult = { permissions ->
-                        val cameraGranted = permissions[Manifest.permission.CAMERA] == true
-                        val audioGranted = permissions[Manifest.permission.RECORD_AUDIO] == true
-                        if (!cameraGranted) {
-                            Toast.makeText(
-                                this,
-                                "Camera permission is necessary for background security recording.",
-                                Toast.LENGTH_LONG
-                            ).show()
+                // Modern Jetpack Compose Lifecycle Observer to safely auto-lock on pause
+                val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+                androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+                    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+                        if (event == androidx.lifecycle.Lifecycle.Event.ON_PAUSE) {
+                            vaultViewModel.lockApp()
                         }
                     }
-                )
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
+                    }
+                }
 
                 LaunchedEffect(Unit) {
                     val notGranted = permissionsToRequest.filter {
                         ContextCompat.checkSelfPermission(this@MainActivity, it) != PackageManager.PERMISSION_GRANTED
                     }
                     if (notGranted.isNotEmpty()) {
-                        permissionLauncher.launch(notGranted.toTypedArray())
+                        androidx.core.app.ActivityCompat.requestPermissions(
+                            this@MainActivity,
+                            notGranted.toTypedArray(),
+                            4819
+                        )
                     }
                 }
 
@@ -171,10 +174,21 @@ class MainActivity : FragmentActivity() {
         }
     }
 
-    override fun onPause() {
-        super.onPause()
-        // Standard high-security habit: Auto-lock active app whenever it goes to background
-        val vaultViewModel = VaultViewModel(application)
-        vaultViewModel.lockApp()
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == 4819) {
+            val cameraIndex = permissions.indexOf(Manifest.permission.CAMERA)
+            if (cameraIndex != -1 && grantResults.getOrNull(cameraIndex) != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(
+                    this,
+                    "Camera permission is necessary for background security recording.",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
     }
 }

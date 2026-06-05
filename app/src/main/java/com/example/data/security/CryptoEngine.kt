@@ -68,7 +68,15 @@ object CryptoEngine {
             val ivSize = input.read()
             if (ivSize <= 0) throw IllegalArgumentException("Invalid IV size in encrypted file")
             val iv = ByteArray(ivSize)
-            input.read(iv)
+            var bytesRead = 0
+            while (bytesRead < ivSize) {
+                val result = input.read(iv, bytesRead, ivSize - bytesRead)
+                if (result == -1) break
+                bytesRead += result
+            }
+            if (bytesRead < ivSize) {
+                throw java.io.IOException("Could not read full IV from source file")
+            }
 
             val cipher = Cipher.getInstance(TRANSFORMATION)
             val spec = GCMParameterSpec(128, iv)

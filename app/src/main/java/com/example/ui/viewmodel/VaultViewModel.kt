@@ -134,11 +134,17 @@ class VaultViewModel(application: Application) : AndroidViewModel(application) {
 
                 val sourceFile = File(recording.filePath)
                 if (sourceFile.exists()) {
-                    // Decrypt AES encrypted file only to local private cache directory
-                    val playFile = File(context.cacheDir, "play_view_${System.currentTimeMillis()}.mp4")
-                    CryptoEngine.decryptFile(sourceFile, playFile)
-                    tempPlaybackFile = playFile
-                    _playbackFileState.value = playFile
+                    if (recording.filePath.endsWith(".enc")) {
+                        // Decrypt AES encrypted file only to local private cache directory
+                        val playFile = File(context.cacheDir, "play_view_${System.currentTimeMillis()}.mp4")
+                        CryptoEngine.decryptFile(sourceFile, playFile)
+                        tempPlaybackFile = playFile
+                        _playbackFileState.value = playFile
+                    } else {
+                        // Play direct unencrypted mp4 file
+                        _playbackFileState.value = sourceFile
+                        tempPlaybackFile = null
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

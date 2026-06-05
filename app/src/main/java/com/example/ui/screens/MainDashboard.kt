@@ -994,9 +994,17 @@ private fun shareEncryptedFile(context: Context, recording: Recording) {
     try {
         val file = File(recording.filePath)
         if (file.exists()) {
-            // Decrypt temporarily in cache so it can be shared through normal share channels
+            // Decrypt or copy temporarily in cache so it can be shared through normal share channels
             val tempSharedFile = File(context.cacheDir, "shared_vaultcam_recording.mp4")
-            CryptoEngine.decryptFile(file, tempSharedFile)
+            if (recording.filePath.endsWith(".enc")) {
+                CryptoEngine.decryptFile(file, tempSharedFile)
+            } else {
+                file.inputStream().use { input ->
+                    tempSharedFile.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+            }
 
             // Let's copy/provide content provider URI
             val authorities = "${context.packageName}.provider"
