@@ -1,0 +1,6 @@
+{
+  "name": "VaultCam",
+  "description": "A high-security, hidden camera and video recorder app with background capture capabilities, private AES-GCM file encryption, biometrics verification, and dynamic camouflage launcher app icons.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
